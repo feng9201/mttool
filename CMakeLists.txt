@@ -22,6 +22,26 @@ target_compile_definitions(${PROJECT_NAME}
         $<$<BOOL:${MT_TOOL_ENABLE_EVENTPP}>:MT_TOOL_EVENTPP_AVAILABLE>
 )
 
+include(CMakePackageConfigHelpers)
+
+configure_package_config_file(
+    cmake/mttoolConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/mttoolConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/${PROJECT_NAME}
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/mttoolConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/mttoolConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/mttoolConfigVersion.cmake"
+    DESTINATION lib/cmake/${PROJECT_NAME}
+)
+
 install(TARGETS ${PROJECT_NAME}
     EXPORT ${PROJECT_NAME}Targets
     INCLUDES DESTINATION include
