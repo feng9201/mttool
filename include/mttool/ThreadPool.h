@@ -134,7 +134,7 @@ namespace mttool
 			}
 		}
 	};
-	inline ThreadPool& instance(int size = MAX_THREAD_NUM)
+	inline ThreadPool& PoolInstance(int size = MAX_THREAD_NUM)
 	{
 		static ThreadPool pool(size); // C++11 保证线程安全初始化
 		return pool;

@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.15)
 project(mttool VERSION 1.0.0 LANGUAGES NONE)
 
-option(MT_TOOL_ENABLE_EVENTPP "Install eventpp headers" ON)
+option(MT_TOOL_ENABLE_EVENTPP "Install eventpp headers" OFF)
+option(MT_TOOL_ENABLE_SPSC "Install spsc headers" OFF)
+option(MT_TOOL_ENABLE_MPMC "Install mpmc headers" OFF)
+
 
 add_library(${PROJECT_NAME} INTERFACE)
 
@@ -53,6 +56,18 @@ install(DIRECTORY include/mttool
 
 if(MT_TOOL_ENABLE_EVENTPP)
     install(DIRECTORY include/eventpp
+        DESTINATION include
+    )
+endif()
+
+if(MT_TOOL_ENABLE_SPSC)
+    install(DIRECTORY include/spsc
+        DESTINATION include
+    )
+endif()
+
+if(MT_TOOL_ENABLE_MPMC)
+    install(DIRECTORY include/mpmc
         DESTINATION include
     )
 endif()
