@@ -4,6 +4,7 @@ project(mttool VERSION 1.0.0 LANGUAGES NONE)
 option(MT_TOOL_ENABLE_EVENTPP "Install eventpp headers" OFF)
 option(MT_TOOL_ENABLE_SPSC "Install spsc headers" OFF)
 option(MT_TOOL_ENABLE_MPMC "Install mpmc headers" OFF)
+option(MT_TOOL_ENABLE_MGENUM "Install magic enum headers" OFF)
 
 
 add_library(${PROJECT_NAME} INTERFACE)
@@ -68,6 +69,12 @@ endif()
 
 if(MT_TOOL_ENABLE_MPMC)
     install(DIRECTORY include/mpmc
+        DESTINATION include
+    )
+endif()
+
+if(MT_TOOL_ENABLE_MGENUM)
+    install(DIRECTORY include/magic_enum
         DESTINATION include
     )
 endif()
