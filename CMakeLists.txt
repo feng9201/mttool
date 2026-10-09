@@ -5,6 +5,7 @@ option(MT_TOOL_ENABLE_EVENTPP "Install eventpp headers" OFF)
 option(MT_TOOL_ENABLE_SPSC "Install spsc headers" OFF)
 option(MT_TOOL_ENABLE_MPMC "Install mpmc headers" OFF)
 option(MT_TOOL_ENABLE_MGENUM "Install magic enum headers" OFF)
+option(MT_TOOL_ENABLE_OBS "Install observer_list headers" OFF)
 
 
 add_library(${PROJECT_NAME} INTERFACE)
@@ -24,6 +25,7 @@ target_compile_definitions(${PROJECT_NAME}
     INTERFACE
         MT_TOOL_LIB_AVAILABLE
         $<$<BOOL:${MT_TOOL_ENABLE_EVENTPP}>:MT_TOOL_EVENTPP_AVAILABLE>
+        $<$<BOOL:${MT_TOOL_ENABLE_OBS}>:MT_TOOL_OBS_AVAILABLE>
 )
 
 include(CMakePackageConfigHelpers)
@@ -76,6 +78,13 @@ endif()
 if(MT_TOOL_ENABLE_MGENUM)
     install(DIRECTORY include/magic_enum
         DESTINATION include
+    )
+endif()
+
+if(MT_TOOL_ENABLE_OBS)
+    install(DIRECTORY include/observer_list
+        DESTINATION include
+        FILES_MATCHING PATTERN "*.h"
     )
 endif()
 
