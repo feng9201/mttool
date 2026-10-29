@@ -1,143 +1,173 @@
-#ifndef THREAD_POOL_H
-#define THREAD_POOL_H
+#ifndef MTTOOL_THREAD_POOL_H
+#define MTTOOL_THREAD_POOL_H
 
-#include <vector>
-#include <queue>
-#include <thread>
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
+#include <deque>
+#include <functional>
 #include <future>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <thread>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
+namespace mttool {
 
-namespace mttool
-{
-	#define MAX_THREAD_NUM 3
-	//线程池，可以提交变参函数或lambda表达式的匿名函数执行，可以获取执行返回值
-	//支持类成员函数，支持类静态成员函数或全局函数，Operator()函数等
-	class ThreadPool
-	{
-		typedef std::function<void()> Task;
-	private:
-		std::vector<std::thread> m_pool;     // 线程池
-		std::queue<Task> m_tasks;    // 任务队列
-		std::mutex m_lock;    // 同步锁
-		std::condition_variable m_cv;   // 条件阻塞
-		std::atomic<bool> m_isStoped;    // 是否关闭提交
-		std::atomic<int> m_idleThreadNum;  //空闲线程数量
-	public:
-		ThreadPool(int size = MAX_THREAD_NUM)
-		{
-			size = size > MAX_THREAD_NUM ? MAX_THREAD_NUM : size;
-			m_idleThreadNum = size;
-			m_isStoped = false;
-			for (int i = 0; i < size; i++)
-			{
-				//初始化线程数量
-				m_pool.emplace_back(&ThreadPool::scheduler, this);
-			}
-		}
-		~ThreadPool()
-		{
-			Close();
-			while (!m_tasks.empty()) {
-				m_tasks.pop();
-			}
-			m_cv.notify_all();  // 唤醒所有线程执行
-			for (std::thread& thread : m_pool) {
-				if (thread.joinable()) {
-					thread.join();  // 等待任务结束，前提是线程一定会执行完
-				}
-			}
-			m_pool.clear();
-		}
-		// 打开线程池，重启任务提交
-		void ReOpen() {
-			if (m_isStoped) m_isStoped.store(false);
-			m_cv.notify_all();
-		}
-		// 关闭线程池，停止提交新任务
-		void Close(bool notify_all=false) {
-			if (!m_isStoped) {
-				m_isStoped.store(true);
-				if(notify_all){
-					m_cv.notify_all();  // 关键：唤醒所有等待的线程
-				}
-			}
-		}
-		// 判断线程池是否被关闭
-		bool IsClosed() const {
-			return m_isStoped.load();
-		}
-		// 获取当前任务队列中的任务数
-		int GetTaskSize() {
-			return m_tasks.size();
-		}
-		// 获取当前空闲线程数
-		int IdleCount() {
-			return m_idleThreadNum;
-		}
-		// 提交任务并执行
-		// 调用方式为 std::future<returnType> var = threadpool.Submit(...)
-		// var.get() 会等待任务执行完，并获取返回值
-		// 其中 ... 可以直接用函数名+函数参数代替，例如 threadpool.Submit(f, 0, 1)
-		// 但如果要调用类成员函数，则最好用如下方式
-		// threadpool.Submit(std::bind(&Class::Func, &classInstance)) 或
-		// threadpool.Submit(std::mem_fn(&Class::Func), &classInstance)
-		template<class F, class... Args>
-		auto Submit(F&& f, Args&&... args)->std::future<decltype(f(args...))> //c++14可直接返回推导值
-		{
-			using RetType = decltype(f(args...));  // typename std::result_of<F(Args...)>::type, 函数 f 的返回值类型
-			std::shared_ptr<std::packaged_task<RetType()>> task = std::make_shared<std::packaged_task<RetType()>>(
-				std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-				);
-			std::future<RetType> future = task->get_future();
-			// 封装任务并添加到队列
-			addTask([task = std::move(task)]() {
-				(*task)();
-			});
+class ThreadPool {
+public:
+    static constexpr std::size_t kFallbackThreadCount = 4;
 
-			return future;
-		}
-	private:
-		// 消费者
-		Task getTask() {
-			std::unique_lock<std::mutex> lock(m_lock); // unique_lock 相比 lock_guard 的好处是：可以随时 unlock() 和 lock()
-			while (m_tasks.empty() && !m_isStoped) {
-				m_cv.wait(lock);
-			}  // wait 直到有 task
-			if (m_isStoped) {
-				return Task();
-			}
-			//assert(!m_tasks.empty());
-			Task task = std::move(m_tasks.front()); // 取一个 task
-			m_tasks.pop();
-			//m_cv.notify_one();
-			return task;
-		}
+    // 线程数不再受硬上限约束；默认取硬件并发度，取不到时用 4。
+    static std::size_t DefaultThreadCount() noexcept {
+        const unsigned hw = std::thread::hardware_concurrency();
+        return hw > 0 ? static_cast<std::size_t>(hw) : kFallbackThreadCount;
+    }
 
-		// 生产者
-		void addTask(Task task)
-		{
-			std::lock_guard<std::mutex> lock{ m_lock }; //对当前块的语句加锁 lock_guard 是 mutex 的 stack 封装类，构造的时候 lock()，析构的时候 unlock()
-			m_tasks.push(task);
-			m_cv.notify_one(); // 唤醒一个线程执行
-		}
-		// 工作线程主循环函数
-		void scheduler() {
-			while (!m_isStoped.load(std::memory_order_acquire)) {
-				Task task(getTask());
-				if (task) {
-					m_idleThreadNum.fetch_sub(1, std::memory_order_relaxed);
-					task();
-					m_idleThreadNum.fetch_add(1, std::memory_order_relaxed);
-				}
-			}
-		}
-	};
-	inline ThreadPool& PoolInstance(int size = MAX_THREAD_NUM)
-	{
-		static ThreadPool pool(size); // C++11 保证线程安全初始化
-		return pool;
-	}
+    explicit ThreadPool(std::size_t threadCount = DefaultThreadCount()) {
+        if (threadCount == 0) threadCount = 1;
+        m_threads.reserve(threadCount);
+        try {
+            for (std::size_t i = 0; i < threadCount; ++i) {
+                m_threads.emplace_back(&ThreadPool::WorkerLoop, this);
+            }
+        } catch (...) {
+            Shutdown(false);
+            throw;
+        }
+    }
+
+    // 默认优雅退出：不再接收新任务，把手上的任务跑完再回收线程。
+    ~ThreadPool() { Shutdown(true); }
+
+    ThreadPool(const ThreadPool&) = delete;
+    ThreadPool& operator=(const ThreadPool&) = delete;
+    ThreadPool(ThreadPool&&) = delete;
+    ThreadPool& operator=(ThreadPool&&) = delete;
+
+    // 直接支持成员函数、函数对象、lambda；参数支持 move-only 类型。
+    template <class F, class... Args>
+    auto Submit(F&& f, Args&&... args)
+        -> std::future<std::invoke_result_t<std::decay_t<F>, std::decay_t<Args>...>> {
+        using Result = std::invoke_result_t<std::decay_t<F>, std::decay_t<Args>...>;
+        auto task = std::make_shared<std::packaged_task<Result()>>(
+            [fn = std::forward<F>(f), bound = std::make_tuple(std::forward<Args>(args)...)]() mutable -> Result {
+                return std::apply(
+                    [&fn](auto&&... a) -> Result {
+                        return std::invoke(std::move(fn), std::move(a)...);
+                    },
+                    std::move(bound));
+            });
+
+        std::future<Result> future = task->get_future();
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_closed) {
+                throw std::runtime_error("mttool::ThreadPool: Submit on a closed pool");
+            }
+            m_tasks.emplace_back([task] { (*task)(); });
+        }
+        m_cv.notify_one();
+        return future;
+    }
+
+    // 停止接收新任务；已入队的任务继续执行，线程不退出，因此可以 ReOpen。
+    void Close() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_closed = true;
+    }
+
+    // 只对 Close() 有效；Shutdown 之后线程已回收，不能再打开。
+    bool ReOpen() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_shutdown) return false;
+        m_closed = false;
+        return true;
+    }
+
+    bool IsClosed() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_closed;
+    }
+
+    std::size_t GetTaskSize() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_tasks.size();
+    }
+
+    std::size_t ThreadCount() const noexcept { return m_threads.size(); }
+
+    // 当前没有在跑任务的线程数；排队中的任务不算忙。
+    std::size_t IdleCount() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_threads.size() - m_busy;
+    }
+
+    // 等到队列空且没有任务在执行。不要在任务内部调用，会自等。
+    void Wait() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_idleCv.wait(lock, [this] { return m_tasks.empty() && m_busy == 0; });
+    }
+
+    // drain = true 跑完剩余任务，false 直接丢弃。返回 false 表示已经停止过。
+    // 不要在任务内部调用，会 join 自己。
+    bool Shutdown(bool drain = true) {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_shutdown) return false;
+            if (!drain) m_tasks.clear();
+            m_shutdown = true;
+            m_closed = true;
+        }
+        m_cv.notify_all();
+        for (std::thread& thread : m_threads) {
+            if (thread.joinable()) thread.join();
+        }
+        return true;
+    }
+
+private:
+    void WorkerLoop() {
+        for (;;) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_cv.wait(lock, [this] { return m_shutdown || !m_tasks.empty(); });
+                if (m_shutdown && m_tasks.empty()) return;
+                task = std::move(m_tasks.front());
+                m_tasks.pop_front();
+                ++m_busy;
+            }
+
+            task();
+
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                --m_busy;
+                if (m_tasks.empty() && m_busy == 0) m_idleCv.notify_all();
+            }
+        }
+    }
+
+    mutable std::mutex m_mutex;
+    std::condition_variable m_cv;
+    std::condition_variable m_idleCv;
+    std::deque<std::function<void()>> m_tasks;
+    std::vector<std::thread> m_threads;
+    std::size_t m_busy = 0;
+    bool m_closed = false;
+    bool m_shutdown = false;
+};
+
+inline ThreadPool& PoolInstance(std::size_t threadCount = ThreadPool::DefaultThreadCount()) {
+    static ThreadPool pool(threadCount);
+    return pool;
 }
-#endif
+
+}  // namespace mttool
+
+#endif  // MTTOOL_THREAD_POOL_H
