@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(mttool VERSION 1.0.0 LANGUAGES NONE)
+project(mttool VERSION 1.1.0 LANGUAGES NONE)
 
 option(MT_TOOL_ENABLE_EVENTPP "Install eventpp headers" OFF)
 option(MT_TOOL_ENABLE_SPSC "Install spsc headers" OFF)
